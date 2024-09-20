@@ -1,0 +1,5 @@
+[web]
+localhost ansible_connection=local
+
+[target]
+<target-ip> ansible_user=<user> ansible_ssh_private_key_file=~/.ssh/id_rsa

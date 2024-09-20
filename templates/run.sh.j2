@@ -1,0 +1,3 @@
+#!/bin/bash
+export INSTANCE_PATH="{{ instance_path }}"
+/opt/example/venv/bin/gunicorn --chdir /opt/example -b 0.0.0.0:{{ port }} app:app

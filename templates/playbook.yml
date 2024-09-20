@@ -1,0 +1,134 @@
+---
+- hosts: all
+  become: yes
+  vars_files:
+    - vault.yml
+
+  tasks:
+    - name: Install standard CA certificates
+      package:
+        name: ca-certificates
+        state: present
+
+    - name: Install custom CA certificates
+      copy:
+        src: "{{ item }}"
+        dest: /usr/local/share/ca-certificates/{{ item | basename }}
+        mode: '0644'
+      loop:
+        - files/CA1.crt
+        - files/CA2.crt
+        - files/CA3.crt
+      notify:
+        - update-ca-certificates
+
+    - name: Ensure custom CA certificates are valid (not expired)
+      command: openssl x509 -noout -checkend 0 -in /usr/local/share/ca-certificates/{{ item | basename }}
+      loop:
+        - files/CA1.crt
+        - files/CA2.crt
+        - files/CA3.crt
+      register: ca_validity_check
+      failed_when: false
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Create deployment directory
+      file:
+        path: /opt/example/
+        state: directory
+        mode: '0755'
+
+    - name: Copy app.py to remote host
+      copy:
+        src: /root/ansible_project/files/app.py
+        dest: /opt/example/app.py  
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Create virtual environment
+      command: python3 -m venv /opt/example/venv
+
+    - name: Create directory for instance configuration
+      file:
+        path: /opt/example/venv/var/example-instance
+        state: directory
+        mode: '0755'  
+
+    - name: Copy config.py to remote instance configuration directory
+      copy:
+        src: /root/ansible_project/templates/config.py 
+        dest: /opt/example/venv/var/example-instance/config.py
+        mode: '0644'
+
+    - name: Copy Flask app wheel file to deployment directory
+      copy:
+        src: /root/ansible_project/files/Example-1.1.2-py3-none-any.whl
+        dest: /opt/example/
+        mode: '0644'
+
+    - name: Install PostgreSQL client
+      package:
+        name: postgresql
+        state: present
+
+    - name: Deploy config.py to instance folder
+      template:
+        src: templates/config.py.j2
+        dest: /opt/example/instance/config.py
+        mode: '0644'
+      vars:
+        rds_endpoint: "database-1.cpsoa8o2qsx7.ap-south-1.rds.amazonaws.com"
+        rds_username: "database-1"
+        rds_password: "welcome1234"
+        rds_dbname: "postgres"
+
+    - name: Test connection to RDS database
+      shell: "psql postgresql://{{ rds_username }}:{{ rds_password }}@{{ rds_endpoint }}:5432/{{ rds_dbname }} -c '\l'"
+      register: rds_test
+      ignore_errors: yes
+
+    - name: Fail if unable to connect to RDS
+      fail:
+        msg: "Failed to connect to RDS"
+      when: rds_test.rc != 0
+
+    - name: Ensure virtual environment is activated and package is installed
+      shell: |
+        source /opt/example/venv/bin/activate
+        pip install /opt/example/Example-1.1.2-py3-none-any.whl
+      args:
+        executable: /bin/bash
+
+    - name: Ensure Gunicorn is running with the app
+      shell: |
+        /opt/example/venv/bin/gunicorn --chdir /opt/example -b 0.0.0.0:5000 app:app
+      args:
+        executable: /bin/bash
+      async: 10  # To prevent long waits, Gunicorn runs in the background.
+      poll: 0  # Let Gunicorn run in the background and move on
+
+    - name: Check if Gunicorn is running
+      shell: pgrep -f gunicorn
+      register: gunicorn_pid
+      ignore_errors: true
+
+    - name: Fail if Gunicorn is not running
+      fail:
+        msg: "Gunicorn failed to start."
+      when: gunicorn_pid is not defined
+
+  handlers:
+    - name: update-ca-certificates
+      command: update-ca-certificates
+
+    - name: systemctl daemon-reload
+      command: systemctl daemon-reload
+
+    - name: systemctl start example
+      command: systemctl start example
+
+    - name: systemctl enable example
+      command: systemctl enable example
+

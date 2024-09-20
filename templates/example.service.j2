@@ -1,0 +1,12 @@
+[Unit]
+Description=Flask App Service
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/opt/example
+Environment="INSTANCE_PATH={{ instance_path }}"
+ExecStart=/opt/example/run.sh
+
+[Install]
+WantedBy=multi-user.target
